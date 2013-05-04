@@ -1,0 +1,2 @@
+Figure out implementation strategy for CRTP portion of code.
+Consider renaming Crazyflie monad to Crazyradio to better represent its place in the stack

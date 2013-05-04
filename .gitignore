@@ -1,2 +1,5 @@
 dist
 cabal-dev
+report.txt
+done.txt
+todo.txt.bak
