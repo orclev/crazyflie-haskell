@@ -57,10 +57,11 @@ instance Show RadioAddress where
     show (RadioAddress a) = show $ BS.unpack a
 
 data ACK = ACK {
-    ackAck :: Bool,
-    ackPowerDet :: Bool,
-    ackRetry :: Int,
-    ackData :: ByteString
+    ackAck :: !Bool,
+    ackPowerDet :: !Bool,
+    ackRetry :: !Int,
+    ackHeader :: !Word8,
+    ackData :: !ByteString
 }
 
 minAddress :: Num a => a

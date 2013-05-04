@@ -15,7 +15,7 @@ module Network.Crazyflie
     , sendPacket
     ) where
 
-import Prelude
+import Prelude hiding (catch)
 import qualified Prelude as P
 import qualified Network.Crazyflie.Types as X
 import Network.Crazyflie.Constants
@@ -153,18 +153,22 @@ scanChannels start stop packet = do
     sendVendorSetupExact scanChannelsRequest start stop packet
     getVendorSetup scanChannelsRequest 0 0 64
 
-sendPacket :: Packet -> Crazyflie ACK
+sendPacket :: Packet -> Crazyflie (Maybe ACK)
 sendPacket packet = do
     state <- ask
     let dh = radioHandle state
     let inAddress = bulkInputAddress state
     let outAddress = bulkOutputAddress state
-    liftIO $ writeBulk dh inAddress packet 1000
-    (response, _) <- liftIO $ readBulk dh outAddress 64 1000
-    return $ parseACK response
+    liftIO $ handle ignoreException $ do
+        writeBulk dh inAddress packet 1000
+        (response, _) <- readBulk dh outAddress 64 1000
+        return $ Just (parseACK response)
+    where
+        ignoreException :: USBException -> IO (Maybe ACK)
+        ignoreException _ = return Nothing
 
 parseACK :: ByteString -> ACK
-parseACK bytes = ACK ack powerDet retry (BS.tail bytes)
+parseACK bytes = ACK ack powerDet retry byte0 (BS.tail bytes)
     where
         ack = byte0 .&. 0x01 /= 0
         powerDet = byte0 .&. 0x02 /= 0

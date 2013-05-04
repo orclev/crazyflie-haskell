@@ -4,29 +4,39 @@ module Network.Crazyflie.CRTP
     , findCrazyRadios
     , findFirstCrazyRadio
     , withCrazyRadio
+    , runSession
+    , sendEmptyPacket
+    , tapWire
     ) where
 
+import Prelude hiding ((.), id)
 import Network.Crazyflie
 import Network.Crazyflie.CRTP.Types as X
 import qualified Data.ByteString as BS
-import Control.Concurrent (forkIO, ThreadId, getNumCapabilities)
-import Control.Concurrent.STM
-import Data.Conduit
-import Data.Conduit.TMChan
-import qualified Data.Conduit.List as CL
+import Control.Wire
 
--- Considering doing something with Netwire here, it seems like a good fit
-connect :: Link -> Crazyflie ()
-connect link = do
+runSession :: Link -> CRTP CRTPPacket CRTPPacket -> Crazyflie ()
+runSession link wire = do
     setChannel $ linkChannel link
     setDataRate $ linkDataRate link
     setARC 10
-    (input, output) <- liftIO . atomically $ do
-        a <- newTBMChan 50
-        b <- newTBMChan 50
-        return (a,b)
-    -- TODO: The rest of setting up the various threads
-    return ()
+    loop wire clockSession emptyPacket
+    where
+        loop w' session' packet' = do
+            mack <- sendPacket (packCRTPPacket packet')
+            let ack = maybe emptyPacket mkCRTPPacket mack
+            (mpacket, w, session) <- stepSession w' session' ack
+            case mpacket of
+                Left ex -> loop w session emptyPacket
+                Right packet -> loop w session packet
+
+sendEmptyPacket :: CRTP a CRTPPacket
+sendEmptyPacket = pure emptyPacket
+
+tapWire :: CRTP CRTPPacket CRTPPacket
+tapWire = sendEmptyPacket . perform . onChange
+    where
+        onChange = liftIO . putStrLn . show <$> changed
 
 getChannelList :: Crazyflie [Link]
 getChannelList = do
