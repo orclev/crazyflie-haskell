@@ -30,13 +30,14 @@ runSession link wire = do
                 Left ex -> loop w session emptyPacket
                 Right packet -> loop w session packet
 
-sendEmptyPacket :: CRTP a CRTPPacket
+sendEmptyPacket :: forall a. CRTP a CRTPPacket
 sendEmptyPacket = pure emptyPacket
 
 tapWire :: CRTP CRTPPacket CRTPPacket
-tapWire = sendEmptyPacket . perform . onChange
-    where
-        onChange = liftIO . putStrLn . show <$> changed
+tapWire = proc packet -> do
+        p' <- changed -< packet
+        perform -< liftIO . putStrLn $ show p'
+        returnA -< p'
 
 getChannelList :: Crazyflie [Link]
 getChannelList = do

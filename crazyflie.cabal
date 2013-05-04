@@ -48,6 +48,8 @@ library
                         DeriveDataTypeable
                         GeneralizedNewtypeDeriving
                         TupleSections
+                        Arrows
+                        RankNTypes
 
   -- Modules exported by the library.
   exposed-modules:      Network.Crazyflie
