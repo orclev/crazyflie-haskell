@@ -50,6 +50,7 @@ library
                         TupleSections
                         Arrows
                         RankNTypes
+                        NoImplicitPrelude
 
   -- Modules exported by the library.
   exposed-modules:      Network.Crazyflie
@@ -63,9 +64,12 @@ library
 
   -- Other library packages from which modules are imported.
   build-depends:         base ==4.6.*
+                       , classy-prelude >= 0.5
                        , usb  >= 1.2
                        , vector >= 0.10
                        , bytestring >= 0.10
                        , transformers >= 0.3
                        , mtl >= 2.0
                        , netwire >= 4.0
+                       , binary >= 0.4
+                       , data-binary-ieee754 >= 0.4

@@ -7,12 +7,14 @@ module Network.Crazyflie.CRTP
     , runSession
     , sendEmptyPacket
     , tapWire
+    , onPort
     ) where
 
-import Prelude hiding ((.), id)
+import ClassyPrelude hiding (when)
 import Network.Crazyflie
 import Network.Crazyflie.CRTP.Types as X
 import qualified Data.ByteString as BS
+import Data.Binary
 import Control.Wire
 
 runSession :: Link -> CRTP CRTPPacket CRTPPacket -> Crazyflie ()
@@ -23,7 +25,7 @@ runSession link wire = do
     loop wire clockSession emptyPacket
     where
         loop w' session' packet' = do
-            mack <- sendPacket (packCRTPPacket packet')
+            mack <- sendPacket (toStrict $ encode packet')
             let ack = maybe emptyPacket mkCRTPPacket mack
             (mpacket, w, session) <- stepSession w' session' ack
             case mpacket of
@@ -38,6 +40,11 @@ tapWire = proc packet -> do
         p' <- changed -< packet
         perform -< liftIO . putStrLn $ show p'
         returnA -< p'
+
+onPort :: CRTPPort -> CRTP CRTPPacket CRTPPacket
+onPort port = when isOnPort
+    where
+        isOnPort packet = crtpPacketPort packet == port
 
 getChannelList :: Crazyflie [Link]
 getChannelList = do

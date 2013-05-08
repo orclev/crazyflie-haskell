@@ -15,18 +15,17 @@ module Network.Crazyflie
     , sendPacket
     ) where
 
-import Prelude hiding (catch)
-import qualified Prelude as P
+import ClassyPrelude
 import qualified Network.Crazyflie.Types as X
 import Network.Crazyflie.Constants
-import Data.Vector as V
+import qualified Data.Vector as V
+import qualified Data.ByteString as BS
 import Control.Applicative
-import Data.ByteString as BS
 import Control.Monad.Reader
 import Data.Typeable
 import Data.Word
-import Data.Bits ((.|.), (.&.), shiftR)
-import Control.Exception
+import Data.Bits ((.|.))
+import Data.Binary
 
 findCrazyRadios :: IO (Vector CrazyRadio)
 findCrazyRadios = do
@@ -110,19 +109,12 @@ withCrazyRadio radio f = withDeviceHandle radio withHandle
 setDataRate :: DataRate -> Crazyflie ()
 setDataRate dr = sendVendorSetup dataRateRequest drv 0
     where
-        drv = case dr of
-            DR_250KPS -> 0
-            DR_1MPS -> 1
-            DR_2MPS -> 2
+        drv = coerceInt . BS.head . toStrict $ encode dr
 
 setPower :: RadioPower -> Crazyflie ()
 setPower p = sendVendorSetup radioPowerRequest pv 0
     where
-        pv = case p of
-            P_M18DBM -> 0
-            P_M12DBM -> 1
-            P_M6DBM -> 2
-            P_0DBM -> 3
+        pv = coerceInt . BS.head . toStrict $ encode p
 
 setARC :: ARC -> Crazyflie ()
 setARC arc = sendVendorSetup radioARCRequest arc 0
@@ -142,7 +134,7 @@ setChannel :: Channel -> Crazyflie ()
 setChannel ch = sendVendorSetup radioChannelRequest ch 0
 
 setAddress :: RadioAddress -> Crazyflie ()
-setAddress (RadioAddress address) = sendVendorSetupExact radioAddressRequest 0 0 address
+setAddress address = sendVendorSetupExact radioAddressRequest 0 0 $ toStrict $ encode address
 
 setContCarrier :: Bool -> Crazyflie ()
 setContCarrier True =  sendVendorSetup contCarrierRequest 1 0
@@ -160,20 +152,12 @@ sendPacket packet = do
     let inAddress = bulkInputAddress state
     let outAddress = bulkOutputAddress state
     liftIO $ handle ignoreException $ do
-        writeBulk dh inAddress packet 1000
-        (response, _) <- readBulk dh outAddress 64 1000
-        return $ Just (parseACK response)
+        writeBulk dh inAddress packet 500
+        (response, _) <- readBulk dh outAddress 64 500
+        return $ Just (decode $ fromStrict response)
     where
         ignoreException :: USBException -> IO (Maybe ACK)
         ignoreException _ = return Nothing
-
-parseACK :: ByteString -> ACK
-parseACK bytes = ACK ack powerDet retry byte0 (BS.tail bytes)
-    where
-        ack = byte0 .&. 0x01 /= 0
-        powerDet = byte0 .&. 0x02 /= 0
-        retry = coerceInt $ shiftR byte0 4
-        byte0 = BS.head bytes
 
 sendVendorSetup :: Request -> Value -> Index -> Crazyflie ()
 sendVendorSetup request value index = do
