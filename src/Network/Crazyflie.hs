@@ -42,61 +42,74 @@ isCrazyRadio device = deviceVendorId device == cradioVid && deviceProductId devi
 findFirstCrazyRadio :: IO (Maybe CrazyRadio)
 findFirstCrazyRadio = do
     ctx <- newCtx
+    setDebug ctx PrintWarnings
     devices <- getDevices ctx
     descriptions <- V.mapM (\d -> (d,) <$> getDeviceDesc d) devices
     return $ fst <$> V.find (isCrazyRadio . snd) descriptions
 
-isBulkInput ::  EndpointDesc -> Bool
-isBulkInput endpoint = isBulk && isInput
+isEndpointType :: TransferType -> TransferDirection -> EndpointDesc -> Bool
+isEndpointType ttype direction endpoint = isType && isDirection
     where
-        isInput = isInAddress $ endpointAddress endpoint
-        isBulk = endpointAttribs endpoint == Bulk
+        isDirection = transferDirection (endpointAddress endpoint) == direction
+        isType = endpointAttribs endpoint == ttype
+
+isBulkInput ::  EndpointDesc -> Bool
+isBulkInput = isEndpointType Bulk In
 
 isBulkOutput :: EndpointDesc -> Bool
-isBulkOutput endpoint = isBulk && isOutput
-    where
-        isOutput = isOutAddress $ endpointAddress endpoint
-        isBulk = endpointAttribs endpoint == Bulk
+isBulkOutput = isEndpointType Bulk Out
 
-isInAddress :: EndpointAddress -> Bool
-isInAddress address = transferDirection address == In
+isInterruptInput :: EndpointDesc -> Bool
+isInterruptInput = isEndpointType Interrupt In
 
-isOutAddress :: EndpointAddress -> Bool
-isOutAddress address = transferDirection address == Out
+isInterruptOutput :: EndpointDesc -> Bool
+isInterruptOutput = isEndpointType Interrupt Out
 
 concatV :: Vector (Vector a) -> Vector a
 concatV = V.foldl' (V.++) V.empty
 
-findBulkInput :: Device -> IO (Maybe EndpointAddress)
-findBulkInput device = do
-    configDesc <- getConfigDesc device 0
-    return $ endpointAddress <$> (V.find isBulkInput $ endpoints configDesc)
+findDeviceWhere :: (EndpointDesc -> Bool) -> Device -> IO (Maybe (EndpointAddress, Int))
+findDeviceWhere test device = do
+    cf <- getConfigDesc device 0
+    return $ (,) <$> (endpointAddress <$> mendpoint cf) <*> ((maxPacketSize . endpointMaxPacketSize) <$> mendpoint cf)
     where
+        mendpoint :: ConfigDesc -> Maybe EndpointDesc
+        mendpoint = V.find test . endpoints
         endpoints :: ConfigDesc -> Vector EndpointDesc
         endpoints = interfaceEndpoints . V.head . concatV . configInterfaces
 
-findBulkOutput :: Device -> IO (Maybe EndpointAddress)
-findBulkOutput device = do
-    configDesc <- getConfigDesc device 0
-    return $ endpointAddress <$> (V.find isBulkOutput $ endpoints configDesc)
-    where
-        endpoints :: ConfigDesc -> Vector EndpointDesc
-        endpoints = interfaceEndpoints . V.head . concatV . configInterfaces
+findBulkInput :: Device -> IO (Maybe (EndpointAddress, Int))
+findBulkInput = findDeviceWhere isBulkInput
 
+findBulkOutput :: Device -> IO (Maybe (EndpointAddress, Int))
+findBulkOutput = findDeviceWhere isBulkOutput
+
+findInterruptInput :: Device -> IO (Maybe (EndpointAddress, Int))
+findInterruptInput = findDeviceWhere isInterruptInput
+
+findInterruptOutput :: Device -> IO (Maybe (EndpointAddress, Int))
+findInterruptOutput = findDeviceWhere isInterruptOutput
 
 withCrazyRadio :: CrazyRadio -> (Crazyflie a) -> IO a
 withCrazyRadio radio f = withDeviceHandle radio withHandle
     where
         withHandle dh = do
-            (Just bi) <- findBulkInput radio
-            (Just bo) <- findBulkOutput radio
-            runReaderT (initRadio f) $ CFS dh bi bo
+            Just (bi, _) <- findBulkInput radio
+            Just (bo, size) <- findBulkOutput radio
+            --(Just ii) <- findInterruptInput radio
+            --(Just io) <- findInterruptOutput radio
+            runReaderT (initRadio f) $ CFS dh bi bo size --ii io
         initRadio :: (Crazyflie a) -> Crazyflie a
         initRadio f = do
             state <- ask
             let dh = radioHandle state
             liftIO $ setConfig dh (Just 1)
-            liftIO $ claimInterface dh 0
+            liftIO $
+                withDetachedKernelDriver dh 0 $ -- Remove kernel driver is necessary
+                    withClaimedInterface dh 0 $ -- Claim the interface
+                        runReaderT (withInterface f) state
+        withInterface :: (Crazyflie a) -> Crazyflie a
+        withInterface f = do
             setDataRate DR_2MPS
             setChannel 2
             setContCarrier False
@@ -151,13 +164,17 @@ sendPacket packet = do
     let dh = radioHandle state
     let inAddress = bulkInputAddress state
     let outAddress = bulkOutputAddress state
+    let size = cfMaxPacketSize state
     liftIO $ handle ignoreException $ do
-        writeBulk dh inAddress packet 500
-        (response, _) <- readBulk dh outAddress 64 500
+        --putStrLn $ "sending packet " ++ show packet
+        writeBulk dh inAddress packet 100
+        (response, _) <- readBulk dh outAddress (size * 64) 100
         return $ Just (decode $ fromStrict response)
     where
         ignoreException :: USBException -> IO (Maybe ACK)
-        ignoreException _ = return Nothing
+        ignoreException e = do
+            putStrLn $ "Got exception " ++ show e
+            return Nothing
 
 sendVendorSetup :: Request -> Value -> Index -> Crazyflie ()
 sendVendorSetup request value index = do

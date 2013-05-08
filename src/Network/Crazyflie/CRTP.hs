@@ -17,7 +17,7 @@ import qualified Data.ByteString as BS
 import Data.Binary
 import Control.Wire
 
-runSession :: Link -> CRTP CRTPPacket CRTPPacket -> Crazyflie ()
+runSession :: (Show a, Eq a, Binary a, Show b, Eq b, Binary b) => Link -> CRTP (CRTPPacket a) (CRTPPacket b) -> Crazyflie ()
 runSession link wire = do
     setChannel $ linkChannel link
     setDataRate $ linkDataRate link
@@ -25,6 +25,7 @@ runSession link wire = do
     loop wire clockSession emptyPacket
     where
         loop w' session' packet' = do
+            liftIO $ putStrLn $ "Sending packet " ++ show packet'
             mack <- sendPacket (toStrict $ encode packet')
             let ack = maybe emptyPacket mkCRTPPacket mack
             (mpacket, w, session) <- stepSession w' session' ack
@@ -32,19 +33,19 @@ runSession link wire = do
                 Left ex -> loop w session emptyPacket
                 Right packet -> loop w session packet
 
-sendEmptyPacket :: forall a. CRTP a CRTPPacket
+sendEmptyPacket :: (Show b, Eq b, Binary b) => forall a. CRTP a (CRTPPacket b)
 sendEmptyPacket = pure emptyPacket
 
-tapWire :: CRTP CRTPPacket CRTPPacket
+tapWire :: (Show a, Eq a) => CRTP (CRTPPacket a) (CRTPPacket a)
 tapWire = proc packet -> do
         p' <- changed -< packet
         perform -< liftIO . putStrLn $ show p'
         returnA -< p'
 
-onPort :: CRTPPort -> CRTP CRTPPacket CRTPPacket
+onPort :: CRTPPort -> CRTP (CRTPPacket a) (CRTPPacket a)
 onPort port = when isOnPort
     where
-        isOnPort packet = crtpPacketPort packet == port
+        isOnPort (CRTPPacket port' _ _) = port' == port
 
 getChannelList :: Crazyflie [Link]
 getChannelList = do

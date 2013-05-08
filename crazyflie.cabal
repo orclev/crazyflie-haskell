@@ -51,6 +51,8 @@ library
                         Arrows
                         RankNTypes
                         NoImplicitPrelude
+                        GADTs
+                        StandaloneDeriving
 
   -- Modules exported by the library.
   exposed-modules:      Network.Crazyflie
@@ -59,6 +61,7 @@ library
   -- Modules included in this library but not exported.
   other-modules:        Network.Crazyflie.Types
                         Network.Crazyflie.Constants
+                        Network.Crazyflie.Util
                         Network.Crazyflie.CRTP.Types
                         Network.Crazyflie.CRTP.Constants
 

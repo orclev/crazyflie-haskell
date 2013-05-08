@@ -5,6 +5,9 @@ module Network.Crazyflie.CRTP.Types
     , CRTPPacket (..)
     , mkCRTPPacket
     , emptyPacket
+    , SetPoint (..)
+    , toXMode
+    , pointToPacket
     ) where
 
 import ClassyPrelude
@@ -19,6 +22,7 @@ import Data.Bits ((.&.), (.|.), shiftR, shiftL)
 import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put
+import Data.Binary.IEEE754
 
 -- For some reason you can't use Crzyflie type here, needs to be fully expanded
 type CRTP a b = WireM (ReaderT CrazyflieState IO) a b
@@ -39,46 +43,68 @@ instance P.Show Link where
                     DR_1MPS -> "1M"
                     DR_2MPS -> "2M"
 
-data CRTPPacket = CRTPPacket {
-    crtpPacketHeader :: !Word8,
-    crtpPacketSize :: !Int,
-    crtpPacketPort :: !CRTPPort,
-    crtpPacketChannel :: !Word8,
-    crtpPacketData :: Maybe ByteString
-} deriving (Eq)
+type PacketChannel = Word8
 
-instance P.Show CRTPPacket where
-    show packet = port ++ ": " ++ channel ++ " " ++ dat
+data CRTPPacket a where
+    CRTPPacket :: (Binary a, Eq a) => !CRTPPort -> !PacketChannel -> Maybe a -> CRTPPacket a
+
+deriving instance Eq a => Eq (CRTPPacket a)
+
+instance (Show a) => P.Show (CRTPPacket a) where
+    show (CRTPPacket port channel dat) = "(" ++ port' ++ ", " ++ channel' ++ "): " ++ dat'
         where
-            port = show $ crtpPacketPort packet
-            channel = show $ crtpPacketChannel packet
-            dat = show $ crtpPacketData packet
+            port' = show port
+            channel' = show channel
+            dat' = show dat
 
-instance Binary CRTPPacket where
-    put packet = maybe headerByte packBody $ crtpPacketData packet
+instance (Binary a, Eq a) => Binary (CRTPPacket a) where
+    put (CRTPPacket port channel dat) = maybe headerByte packBody dat
         where
             shiftL' = flip shiftL
-            port = shiftL' 4 . BS.head . toStrict . encode $ crtpPacketPort packet
-            channel = crtpPacketChannel packet
-            header = channel .|. port
+            port' = shiftL' 4 . BS.head . toStrict . encode $ port
+            header = channel .|. port'
             headerByte = putWord8 header
             packBody dat = do
                 headerByte
-                putByteString dat
+                put dat
     get = do
         header <- getWord8
         let port = decode $ pack $ [shiftR (header .&. 0xF0) 4]
             channel = decode $ pack $ [header .&. 0x03]
         x <- remaining
         if x == 0 then
-                return $ CRTPPacket header 0 port channel Nothing
+                return $ CRTPPacket port channel Nothing
             else
                 do
-                    dat <- getByteString $ coerceInt x
-                    return $ CRTPPacket header (BS.length dat) port channel (Just dat)
+                    dat <- get
+                    return $ CRTPPacket port channel (Just dat)
 
-emptyPacket :: CRTPPacket
-emptyPacket = CRTPPacket 0xff 0 All 0 Nothing
+emptyPacket :: (Eq a, Binary a) => CRTPPacket a
+emptyPacket = CRTPPacket All 0xff Nothing
 
-mkCRTPPacket :: ACK -> CRTPPacket
+mkCRTPPacket :: (Eq a, Binary a) => ACK -> CRTPPacket a
 mkCRTPPacket = decode . encode
+
+data SetPoint = SetPoint {
+    pointRoll :: Float,
+    pointPitch :: Float,
+    pointYaw :: Float,
+    pointThrust :: Word16
+} deriving (Show, Eq)
+
+toXMode :: SetPoint -> SetPoint
+toXMode point = point {
+    pointRoll = 0.707 * (pointRoll point - pointPitch point),
+    pointPitch = 0.707 * (pointRoll point + pointPitch point)
+}
+
+instance Binary SetPoint where
+    put point = do
+        putFloat32le $ pointRoll point
+        putFloat32le $ pointPitch point * (-1)
+        putFloat32le $ pointYaw point
+        putWord16le $ pointThrust point
+    get = SetPoint <$> getFloat32le <*> getFloat32le <*> getFloat32le <*> getWord16le
+
+pointToPacket :: SetPoint -> CRTPPacket SetPoint
+pointToPacket point = CRTPPacket Commander 0 (Just point)

@@ -73,7 +73,8 @@ instance Binary DataRate where
 data CrazyflieState = CFS {
     radioHandle :: DeviceHandle,
     bulkInputAddress :: EndpointAddress,
-    bulkOutputAddress :: EndpointAddress
+    bulkOutputAddress :: EndpointAddress,
+    cfMaxPacketSize :: !Int
 }  deriving (Eq)
 
 newtype RadioAddress = RadioAddress Integer
