@@ -167,8 +167,8 @@ sendPacket packet = do
     let size = cfMaxPacketSize state
     liftIO $ handle ignoreException $ do
         --putStrLn $ "sending packet " ++ show packet
-        writeBulk dh inAddress packet 100
-        (response, _) <- readBulk dh outAddress (size * 64) 100
+        writeBulk dh inAddress packet 200
+        (response, complete) <- readBulk dh outAddress (size * 64) 200
         return $ Just (decode $ fromStrict response)
     where
         ignoreException :: USBException -> IO (Maybe ACK)

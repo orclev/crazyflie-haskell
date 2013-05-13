@@ -121,13 +121,15 @@ data ACK = ACK {
     ackPowerDet :: !Bool,
     ackRetry :: !Int,
     ackHeader :: !Word8,
-    ackData :: !ByteString
-}
+    ackData :: Maybe ByteString
+} deriving (Show, Eq)
 
 instance Binary ACK where
     put ack = do
         putWord8 byte0
-        putByteString (ackData ack)
+        case ackData ack of
+            Just dat -> putByteString dat
+            Nothing -> return ()
         where
             byte0 = ackBit .|. powerBit .|. retryBits
             ackBit = if ackAck ack then 0x01 else 0x00
@@ -138,9 +140,13 @@ instance Binary ACK where
         let ack = header .&. 0x01 /= 0
             powerDet = header .&. 0x02 /= 0
             retry = coerceInt $ shiftR header 4
+            retry' = if header == 0 then 3 else retry
         r <- remaining
-        dat <- getByteString $ coerceInt r
-        return $ ACK ack powerDet retry header dat
+        if r > 0 then do
+            dat <- getByteString $ coerceInt r
+            return $ ACK ack powerDet retry' header (Just dat)
+            else
+                return $ ACK ack powerDet retry' header Nothing
 
 mkRadioAddress :: Integer -> RadioAddress
 mkRadioAddress a = if a < minAddress || a > maxAddress then throw InvalidAddressException else RadioAddress a

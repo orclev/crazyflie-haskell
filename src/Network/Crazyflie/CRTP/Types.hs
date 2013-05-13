@@ -3,11 +3,14 @@ module Network.Crazyflie.CRTP.Types
     , Link (..)
     , CRTP
     , CRTPPacket (..)
-    , mkCRTPPacket
+    , ackToCRTPPacket
     , emptyPacket
     , SetPoint (..)
     , toXMode
     , pointToPacket
+    , crtpPort
+    , crtpChannel
+    , crtpData
     ) where
 
 import ClassyPrelude
@@ -44,25 +47,33 @@ instance P.Show Link where
                     DR_2MPS -> "2M"
 
 type PacketChannel = Word8
+type RetryCount = Int
 
 data CRTPPacket a where
     CRTPPacket :: (Binary a, Eq a) => !CRTPPort -> !PacketChannel -> Maybe a -> CRTPPacket a
 
+crtpPort :: CRTPPacket a -> CRTPPort
+crtpPort (CRTPPacket port _ _) = port
+crtpChannel :: CRTPPacket a -> PacketChannel
+crtpChannel (CRTPPacket _ channel _) = channel
+crtpData :: CRTPPacket a -> Maybe a
+crtpData (CRTPPacket _ _ dat) = dat
+
 deriving instance Eq a => Eq (CRTPPacket a)
 
 instance (Show a) => P.Show (CRTPPacket a) where
-    show (CRTPPacket port channel dat) = "(" ++ port' ++ ", " ++ channel' ++ "): " ++ dat'
+    show packet = "(" ++ port ++ ", " ++ channel ++ "): " ++ dat
         where
-            port' = show port
-            channel' = show channel
-            dat' = show dat
+            port = show $ crtpPort packet
+            channel = show $ crtpChannel packet
+            dat = show $ crtpData packet
 
 instance (Binary a, Eq a) => Binary (CRTPPacket a) where
-    put (CRTPPacket port channel dat) = maybe headerByte packBody dat
+    put packet = maybe headerByte packBody (crtpData packet)
         where
             shiftL' = flip shiftL
-            port' = shiftL' 4 . BS.head . toStrict . encode $ port
-            header = channel .|. port'
+            port = shiftL' 4 . BS.head . toStrict . encode $ crtpPort packet
+            header = (crtpChannel packet) .|. port
             headerByte = putWord8 header
             packBody dat = do
                 headerByte
@@ -73,7 +84,7 @@ instance (Binary a, Eq a) => Binary (CRTPPacket a) where
             channel = decode $ pack $ [header .&. 0x03]
         x <- remaining
         if x == 0 then
-                return $ CRTPPacket port channel Nothing
+            return $ CRTPPacket port channel Nothing
             else
                 do
                     dat <- get
@@ -82,8 +93,8 @@ instance (Binary a, Eq a) => Binary (CRTPPacket a) where
 emptyPacket :: (Eq a, Binary a) => CRTPPacket a
 emptyPacket = CRTPPacket All 0xff Nothing
 
-mkCRTPPacket :: (Eq a, Binary a) => ACK -> CRTPPacket a
-mkCRTPPacket = decode . encode
+ackToCRTPPacket :: (Eq a, Binary a) => ACK -> Maybe (CRTPPacket a)
+ackToCRTPPacket ack = (decode . fromStrict) <$> ackData ack
 
 data SetPoint = SetPoint {
     pointRoll :: Float,
