@@ -9,7 +9,6 @@ module Network.Crazyflie.CRTP.Types
     , toXMode
     , pointToPacket
     , crtpPort
-    , crtpChannel
     , crtpData
     ) where
 
@@ -21,13 +20,12 @@ import Network.Crazyflie.CRTP.Constants as X
 import Control.Wire
 import Control.Monad.Reader
 import Data.Word
-import Data.Bits ((.&.), (.|.), shiftR, shiftL)
 import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put
 import Data.Binary.IEEE754
 
--- For some reason you can't use Crzyflie type here, needs to be fully expanded
+-- For some reason you can't use Crazyflie type here, needs to be fully expanded
 type CRTP a b = WireM (ReaderT CrazyflieState IO) a b
 
 data Link = Link {
@@ -50,48 +48,40 @@ type PacketChannel = Word8
 type RetryCount = Int
 
 data CRTPPacket a where
-    CRTPPacket :: (Binary a, Eq a) => !CRTPPort -> !PacketChannel -> Maybe a -> CRTPPacket a
+    CRTPPacket :: (Binary a, Eq a) => !CRTPPort -> Maybe a -> CRTPPacket a
 
 crtpPort :: CRTPPacket a -> CRTPPort
-crtpPort (CRTPPacket port _ _) = port
-crtpChannel :: CRTPPacket a -> PacketChannel
-crtpChannel (CRTPPacket _ channel _) = channel
+crtpPort (CRTPPacket port _) = port
 crtpData :: CRTPPacket a -> Maybe a
-crtpData (CRTPPacket _ _ dat) = dat
+crtpData (CRTPPacket _ dat) = dat
 
 deriving instance Eq a => Eq (CRTPPacket a)
 
 instance (Show a) => P.Show (CRTPPacket a) where
-    show packet = "(" ++ port ++ ", " ++ channel ++ "): " ++ dat
+    show packet = "(" ++ port ++ "): " ++ dat
         where
             port = show $ crtpPort packet
-            channel = show $ crtpChannel packet
             dat = show $ crtpData packet
 
 instance (Binary a, Eq a) => Binary (CRTPPacket a) where
-    put packet = maybe headerByte packBody (crtpData packet)
+    put packet = maybe port packBody (crtpData packet)
         where
-            shiftL' = flip shiftL
-            port = shiftL' 4 . BS.head . toStrict . encode $ crtpPort packet
-            header = (crtpChannel packet) .|. port
-            headerByte = putWord8 header
+            port = put $ crtpPort packet
             packBody dat = do
-                headerByte
+                port
                 put dat
     get = do
-        header <- getWord8
-        let port = decode $ pack $ [shiftR (header .&. 0xF0) 4]
-            channel = decode $ pack $ [header .&. 0x03]
+        port <- get
         x <- remaining
         if x == 0 then
-            return $ CRTPPacket port channel Nothing
+            return $ CRTPPacket port Nothing
             else
                 do
                     dat <- get
-                    return $ CRTPPacket port channel (Just dat)
+                    return $ CRTPPacket port (Just dat)
 
 emptyPacket :: (Eq a, Binary a) => CRTPPacket a
-emptyPacket = CRTPPacket All 0xff Nothing
+emptyPacket = CRTPPacket (All AllBroadcast) Nothing
 
 ackToCRTPPacket :: (Eq a, Binary a) => ACK -> Maybe (CRTPPacket a)
 ackToCRTPPacket ack = (decode . fromStrict) <$> ackData ack
@@ -118,4 +108,5 @@ instance Binary SetPoint where
     get = SetPoint <$> getFloat32le <*> getFloat32le <*> getFloat32le <*> getWord16le
 
 pointToPacket :: SetPoint -> CRTPPacket SetPoint
-pointToPacket point = CRTPPacket Commander 0 (Just point)
+pointToPacket point = CRTPPacket (Commander CommanderChannel) (Just point)
+
